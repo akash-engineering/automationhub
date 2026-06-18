@@ -26,7 +26,8 @@ Docker:
 
 ```bash
 cp .env.example .env           # then edit secrets
-docker compose up --build      # builds the app image, starts Postgres + app
+docker compose up --build -d   # builds the app image, starts Postgres + app
+docker compose logs -f app     # tail app logs
 docker compose down            # stop; add -v to wipe the postgres-data volume
 ```
 
@@ -48,6 +49,52 @@ Inside compose, `DB_URL` uses host `postgres` (the service name). For local-with
 - Swagger UI: <http://localhost:8080/swagger-ui.html>
 - OpenAPI JSON: <http://localhost:8080/v3/api-docs>
 - Actuator health: <http://localhost:8080/actuator/health>
+
+## Endpoint quick reference
+
+| Method | Path                                                         | Auth   |
+|--------|--------------------------------------------------------------|--------|
+| POST   | `/auth/register`                                             | public |
+| POST   | `/auth/login`                                                | public |
+| GET    | `/auth/me`                                                   | bearer |
+| POST   | `/workflows`                                                 | bearer |
+| GET    | `/workflows?page=&size=`                                     | bearer |
+| GET    | `/workflows/{id}`                                            | bearer |
+| DELETE | `/workflows/{id}`                                            | bearer |
+| POST   | `/workflows/{id}/execute`                                    | bearer + `Idempotency-Key` header |
+| GET    | `/workflows/{id}/executions`                                 | bearer |
+| GET    | `/workflows/{id}/executions/{eid}/logs`                      | bearer |
+
+## End-to-end smoke test
+
+```bash
+EMAIL="smoke-$(date +%s)@example.com"
+PASS="StrongPass123!"
+
+curl -sf -X POST http://localhost:8080/auth/register \
+  -H 'Content-Type: application/json' \
+  -d "{\"email\":\"$EMAIL\",\"password\":\"$PASS\"}"
+
+TOKEN=$(curl -sf -X POST http://localhost:8080/auth/login \
+  -H 'Content-Type: application/json' \
+  -d "{\"email\":\"$EMAIL\",\"password\":\"$PASS\"}" \
+  | python -c "import sys,json; print(json.load(sys.stdin)['token'])")
+
+WF=$(curl -sf -X POST http://localhost:8080/workflows \
+  -H "Authorization: Bearer $TOKEN" \
+  -H 'Content-Type: application/json' \
+  -d '{"name":"demo","actions":[{"type":"HTTP","order":0,"config":"{\"url\":\"https://httpbin.org/post\",\"method\":\"POST\",\"body\":{\"hi\":\"there\"}}"}]}' \
+  | python -c "import sys,json; print(json.load(sys.stdin)['id'])")
+
+KEY="run-$(date +%s)"
+curl -sf -X POST http://localhost:8080/workflows/$WF/execute \
+  -H "Authorization: Bearer $TOKEN" -H "Idempotency-Key: $KEY"
+
+sleep 5
+curl -sf -H "Authorization: Bearer $TOKEN" http://localhost:8080/workflows/$WF/executions
+```
+
+Re-running the `POST .../execute` with the same `Idempotency-Key` returns the original execution and does not create a new run.
 
 ## Test conventions
 

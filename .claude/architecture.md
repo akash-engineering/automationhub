@@ -27,8 +27,8 @@ com.automationhub
 │   ├── controller/ service/ repository/ entity/ dto/ event/ idempotency/
 │   └── service/action/                — pluggable ActionExecutor implementations
 │
-└── notification/                      — downstream consumer of workflow events
-    └── listener/ service/ sender/ dto/
+└── notification/                      — downstream consumer of workflow events (NOT YET IMPLEMENTED)
+    └── listener/ service/ sender/ dto/  (planned)
 ```
 
 ## Future modules (not yet created)
@@ -57,11 +57,11 @@ Long-running work (workflow execution, notification dispatch) runs on the named 
 ## Event flow at a glance
 
 ```
-workflow.WorkflowExecutionService  ──publish──▶  WorkflowCompletedEvent / WorkflowFailedEvent
-                                                       │
+workflow.ExecutionRunner            ──publish──▶  WorkflowCompletedEvent / WorkflowFailedEvent
+  (inside the finalize TX)                              │
                                                        │ @TransactionalEventListener(AFTER_COMMIT) + @Async
                                                        ▼
-                                          notification.WorkflowEventListener
+                                          notification.WorkflowEventListener   (not yet implemented)
                                                        │
                                                        ▼
                                           notification.NotificationService
@@ -69,5 +69,7 @@ workflow.WorkflowExecutionService  ──publish──▶  WorkflowCompletedEven
                                                        ▼
                                           notification.sender.{Slack,Email}Sender
 ```
+
+`ExecutionRunner` lives on `automationHubTaskExecutor`; events are published inside the transaction that flips status to `COMPLETED`/`FAILED`, so `AFTER_COMMIT` consumers fire only once the state change is durable.
 
 See `.claude/module-boundaries.md` for the rules that enforce this.

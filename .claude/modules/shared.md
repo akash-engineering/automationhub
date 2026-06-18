@@ -12,12 +12,21 @@ Cross-cutting primitives. No business logic. Everything here is depended on by e
 ### `shared/exception`
 
 - **`ApiError`** — response record: `Instant timestamp, int status, String message, String path`. The wire format for **all** error responses.
-- **`ResourceNotFoundException extends RuntimeException`** — throw this for 404s. Module-specific 404s should still use this class (with a descriptive message) unless they need a distinct HTTP shape.
-- **`GlobalExceptionHandler`** — `@RestControllerAdvice`. Maps `ResourceNotFoundException` → 404 + `ApiError`, fallback `Exception` → 500 + `ApiError`. Extend this when adding new exception types; keep mappings centralized here.
+- **`ResourceNotFoundException extends RuntimeException`** — throw for 404s.
+- **`EmailAlreadyExistsException extends RuntimeException`** — thrown by `auth` on duplicate registration. Mapped to 409.
+- **`InvalidCredentialsException extends RuntimeException`** — thrown by `auth` on bad email or bad password. Message is the generic literal `"Invalid credentials"` — **do not** vary it by field, or you leak which side was wrong. Mapped to 401.
+- **`GlobalExceptionHandler`** — `@RestControllerAdvice`. Current mappings:
+  - `ResourceNotFoundException` → 404
+  - `EmailAlreadyExistsException` → 409
+  - `InvalidCredentialsException` → 401
+  - `MethodArgumentNotValidException` → 400 (joins all field errors with `;`)
+  - fallback `Exception` → 500
+
+  All responses use `ApiError`. Extend this when adding new exception types; keep mappings centralized here.
 
 ### `shared/web`
 
-- **`PageResponse<T>`** — record wrapper for paginated responses: `List<T> content, int page, int size, long totalElements, int totalPages`. Build with `PageResponse.from(Page<T>)` if/when that factory is added.
+- **`PageResponse<T>`** — record wrapper for paginated responses: `List<T> content, int page, int size, long totalElements, int totalPages`. Built inline today from `Page<T>` — add a `static from(Page)` factory when the pattern repeats often enough to feel boilerplatey.
 - **`MdcCorrelationFilter`** (`OncePerRequestFilter`, highest precedence) — puts a fresh UUID into SLF4J MDC under key `correlationId` per request. Don't replace or remove this — every log line in the request flow inherits the id automatically.
 
 ## Adding things here

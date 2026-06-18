@@ -2,7 +2,9 @@
 
 A downstream-only module. Listens to events published by `workflow` (and future modules) and dispatches user-facing notifications. It depends on `shared` and `infrastructure`; it depends on **no other feature module**.
 
-## Layout
+> **Status:** package scaffolding exists, but no listeners, services, or senders are implemented yet. The `workflow` module already publishes `WorkflowCompletedEvent` and `WorkflowFailedEvent` — this module is the next thing to build.
+
+## Layout (target)
 
 ```
 notification/
@@ -10,6 +12,18 @@ notification/
 ├── service/    NotificationService
 ├── sender/     SlackSender, EmailSender
 └── dto/        NotificationRequest
+```
+
+## Events to consume
+
+These are already published by `workflow.ExecutionRunner` from inside the finalize TX:
+
+```java
+public record WorkflowCompletedEvent(UUID workflowId, UUID executionId, UUID ownerId, Instant occurredAt)
+    implements DomainEvent {}
+
+public record WorkflowFailedEvent(UUID workflowId, UUID executionId, UUID ownerId, String reason, Instant occurredAt)
+    implements DomainEvent {}
 ```
 
 ## Listener pattern
@@ -28,13 +42,19 @@ public class WorkflowEventListener {
     public void on(WorkflowCompletedEvent event) {
         // fetch what you need by UUID, build NotificationRequest, call service
     }
+
+    @Async("automationHubTaskExecutor")
+    @TransactionalEventListener(phase = TransactionPhase.AFTER_COMMIT)
+    public void on(WorkflowFailedEvent event) {
+        // include event.reason() in the notification body
+    }
 }
 ```
 
 Rules:
 
 - **`AFTER_COMMIT`** — never `BEFORE_COMMIT` or default phase; we only react to durable changes.
-- **`@Async`** — never block the producer's request thread.
+- **`@Async`** — never block the producer's request thread (which already returned 202 to the client well before this listener fires).
 - The listener is the only thing that knows the event type. The service should accept a neutral DTO (`NotificationRequest`), not a domain event.
 
 ## Service contract
