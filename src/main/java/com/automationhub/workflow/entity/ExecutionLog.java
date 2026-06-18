@@ -15,24 +15,24 @@ import lombok.Setter;
 import java.util.UUID;
 
 @Entity
-@Table(name = "actions")
+@Table(name = "execution_logs")
 @Getter
 @Setter
 @NoArgsConstructor
 @AllArgsConstructor
 @Builder
-public class Action extends BaseEntity {
+public class ExecutionLog extends BaseEntity {
 
     @Column(nullable = false)
-    private UUID workflowId;
+    private UUID executionId;
+
+    @Column(name = "action_order", nullable = false)
+    private int actionOrder;
 
     @Enumerated(EnumType.STRING)
-    @Column(name = "action_type", nullable = false)
-    private ActionType type;
+    @Column(nullable = false)
+    private ExecutionStatus status;
 
     @Column(columnDefinition = "TEXT")
-    private String config;
-
-    @Column(name = "execution_order", nullable = false)
-    private int order;
+    private String message;
 }
