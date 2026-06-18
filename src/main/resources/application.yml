@@ -1,0 +1,40 @@
+spring:
+  application:
+    name: automationhub
+  datasource:
+    url: ${DB_URL:jdbc:postgresql://localhost:5432/automationhub}
+    username: ${DB_USER:automationhub}
+    password: ${DB_PASSWORD:changeme}
+    driver-class-name: org.postgresql.Driver
+  jpa:
+    hibernate:
+      ddl-auto: update
+    open-in-view: false
+    properties:
+      hibernate:
+        dialect: org.hibernate.dialect.PostgreSQLDialect
+        format_sql: true
+    show-sql: false
+
+server:
+  port: 8080
+
+management:
+  endpoints:
+    web:
+      exposure:
+        include: health,info,metrics
+  endpoint:
+    health:
+      show-details: when-authorized
+
+springdoc:
+  api-docs:
+    path: /v3/api-docs
+  swagger-ui:
+    path: /swagger-ui.html
+
+automationhub:
+  jwt:
+    secret: ${JWT_SECRET:replace-with-a-long-random-base64-encoded-secret-at-least-32-bytes-long-please}
+    expiration: ${JWT_EXPIRATION:3600000}
