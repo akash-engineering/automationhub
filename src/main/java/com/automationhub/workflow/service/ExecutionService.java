@@ -11,6 +11,7 @@ import com.automationhub.workflow.idempotency.IdempotencyService;
 import com.automationhub.workflow.repository.ExecutionLogRepository;
 import com.automationhub.workflow.repository.ExecutionRepository;
 import com.automationhub.workflow.repository.WorkflowRepository;
+import org.springframework.dao.DataIntegrityViolationException;
 import org.springframework.data.domain.Page;
 import org.springframework.data.domain.Pageable;
 import org.springframework.stereotype.Service;
@@ -63,10 +64,14 @@ public class ExecutionService {
                 .build());
 
         if (idempotencyKey != null && !idempotencyKey.isBlank()) {
-            UUID resolvedExecutionId = idempotencyService.record(idempotencyKey, ownerId, workflow.getId(), execution.getId());
-            if (!resolvedExecutionId.equals(execution.getId())) {
-                Execution prior = executionRepository.findById(resolvedExecutionId)
-                        .orElseThrow(() -> new ResourceNotFoundException("Execution not found: " + resolvedExecutionId));
+            try {
+                idempotencyService.record(idempotencyKey, ownerId, workflow.getId(), execution.getId());
+            } catch (DataIntegrityViolationException raceLost) {
+                executionRepository.delete(execution);
+                UUID priorId = idempotencyService.findExecutionId(idempotencyKey)
+                        .orElseThrow(() -> raceLost);
+                Execution prior = executionRepository.findById(priorId)
+                        .orElseThrow(() -> new ResourceNotFoundException("Execution not found: " + priorId));
                 return ExecutionResponse.from(prior);
             }
         }
