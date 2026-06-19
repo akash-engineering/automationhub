@@ -68,6 +68,9 @@ Inside compose, `DB_URL` uses host `postgres` (the service name). For local-with
 | DELETE | `/workflows/{id}/webhook`                                    | bearer — disables the webhook |
 | POST   | `/webhooks/workflows/{id}`                                   | **public**, HMAC-signed (`X-Webhook-Timestamp`, `X-Webhook-Signature: sha256=<hex>`) |
 | GET    | `/notifications/executions/{executionId}`                    | bearer |
+| GET    | `/documents?page=&size=`                                     | bearer — owner-scoped, newest first |
+| GET    | `/documents/{id}`                                            | bearer — metadata |
+| GET    | `/documents/{id}/download`                                   | bearer — streams the PDF bytes |
 
 ## End-to-end smoke test
 
@@ -117,6 +120,45 @@ curl -sf -X POST http://localhost:8080/webhooks/workflows/$WF \
 ```
 
 The HMAC covers `timestamp + "." + rawBody`. Replays with the same `Idempotency-Key` (and a fresh signature, since the timestamp changes) return the original `executionId`. Any signature/timestamp/secret failure → generic 401 `{"message":"Unauthorized"}`.
+
+## Document smoke test
+
+```bash
+# (assumes TOKEN from the auth block above)
+CFG=$(python -c "import json;print(json.dumps(json.dumps({\
+  'title':'Invoice #001','recipient':'Acme Corp','currency':'USD',\
+  'lines':[{'description':'Consulting','amount':1500.00},{'description':'Travel','amount':320.00}]})))")
+
+WID=$(curl -sf -X POST http://localhost:8080/workflows -H "Authorization: Bearer $TOKEN" \
+  -H 'Content-Type: application/json' \
+  -d "{\"name\":\"invoice-wf\",\"actions\":[{\"type\":\"DOCUMENT\",\"order\":1,\"config\":$CFG}]}" \
+  | python -c "import sys,json;print(json.load(sys.stdin)['id'])")
+
+curl -sf -X POST "http://localhost:8080/workflows/$WID/execute" \
+  -H "Authorization: Bearer $TOKEN" -H "Idempotency-Key: doc-$(date +%s)"
+sleep 2
+
+DID=$(curl -sf "http://localhost:8080/documents" -H "Authorization: Bearer $TOKEN" \
+  | python -c "import sys,json;print(json.load(sys.stdin)['content'][0]['id'])")
+
+curl -sf "http://localhost:8080/documents/$DID/download" -H "Authorization: Bearer $TOKEN" -o invoice.pdf
+file invoice.pdf    # → PDF document, version 1.5, 1 page(s)
+```
+
+Switch storage backends with `automationhub.document.storage.provider=s3` (will throw `UnsupportedOperationException` until Increment 4 lands the real AWS client).
+
+## Known operational gotcha — enum check constraints
+
+Hibernate's `ddl-auto: update` mode adds new columns/tables but **does not** update existing CHECK constraints. Adding a value to `ActionType` (or any enum stored as `varchar` with a generated CHECK) will fail the first insert of the new value against a long-running DB with `constraint [..._check]` violations.
+
+Quick fix on a running DB:
+
+```bash
+docker exec automationhub-postgres psql -U automationhub -d automationhub \
+  -c "ALTER TABLE actions DROP CONSTRAINT IF EXISTS actions_action_type_check;"
+```
+
+The JPA layer still enforces the enum via `@Enumerated(STRING)` — losing the DB-level CHECK is acceptable until Flyway/Liquibase migrations arrive (Increment 4).
 
 ## Test conventions
 

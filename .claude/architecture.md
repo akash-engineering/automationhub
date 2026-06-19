@@ -27,13 +27,17 @@ com.automationhub
 │   ├── controller/ service/ repository/ entity/ dto/ event/ idempotency/ webhook/
 │   └── service/action/                — pluggable ActionExecutor implementations
 │
-└── notification/                      — downstream consumer of workflow events
-    └── listener/ service/ sender/ entity/ repository/ dto/
+├── notification/                      — downstream consumer of workflow events
+│   └── listener/ service/ sender/ entity/ repository/ dto/
+│
+└── document/                          — PDF generation + storage abstraction
+    ├── controller/ service/ repository/ entity/ dto/ listener/ storage/
+    └── service/action/                — DocumentActionExecutor (plugs into workflow's SPI)
 ```
 
 ## Future modules (not yet created)
 
-`document/`, `payment/`, `sync/` will be added later. Do **not** scaffold them preemptively.
+`payment/`, `sync/` will be added later. Do **not** scaffold them preemptively.
 
 ## Layering inside a module
 
@@ -61,13 +65,17 @@ workflow.ExecutionRunner            ──publish──▶  WorkflowCompletedEve
   (inside the finalize TX)                              │
                                                        │ @TransactionalEventListener(AFTER_COMMIT) + @Async
                                                        ▼
-                                          notification.WorkflowEventListener
-                                                       │
-                                                       ▼
-                                          notification.NotificationService   (persists NotificationDelivery)
-                                                       │
-                                                       ▼
-                                          notification.sender.{Slack,Email}Sender   (log-only, swap point)
+                              ┌────────────────────────┴────────────────────────┐
+                              ▼                                                 ▼
+              notification.WorkflowEventListener            document.WorkflowCompletedListener
+                              │                              (gated by auto-summary.enabled, default off)
+                              ▼                                                 │
+              notification.NotificationService                                  ▼
+              (persists NotificationDelivery)                  document.DocumentService
+                              │                                (renders PDF, persists Document)
+                              ▼                                                 │
+              notification.sender.{Slack,Email}Sender                           ▼
+              (log-only, swap point)                            document.storage.{Local,S3}StorageService
 ```
 
 `ExecutionRunner` lives on `automationHubTaskExecutor`; events are published inside the transaction that flips status to `COMPLETED`/`FAILED`, so `AFTER_COMMIT` consumers fire only once the state change is durable.

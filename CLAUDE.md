@@ -2,7 +2,7 @@
 
 Spring Boot 3 modular monolith. Java 21, Maven, PostgreSQL, JPA, Spring Security + JWT, springdoc-openapi, Lombok, Docker Compose.
 
-Base package: `com.automationhub`. Modules: `shared`, `infrastructure`, `auth`, `workflow`, `notification`. Future (do not create yet): `document`, `payment`, `sync`.
+Base package: `com.automationhub`. Modules: `shared`, `infrastructure`, `auth`, `workflow`, `notification`, `document`. Future (do not create yet): `payment`, `sync`.
 
 ## Module status
 
@@ -13,6 +13,7 @@ Base package: `com.automationhub`. Modules: `shared`, `infrastructure`, `auth`, 
 | `auth`        | Implemented end-to-end. `POST /auth/register`, `POST /auth/login`, `GET /auth/me`.     |
 | `workflow`    | Implemented end-to-end. CRUD, async execution on `automationHubTaskExecutor`, per-step `ExecutionLog`, idempotency via `Idempotency-Key` header (race-safe via `REQUIRES_NEW` + DIV catch), HMAC-signed public webhook trigger, publishes `WorkflowCompletedEvent` / `WorkflowFailedEvent`. |
 | `notification`| Implemented. `@TransactionalEventListener(AFTER_COMMIT) @Async` listener dispatches to `SlackSender` / `EmailSender` (log-only senders), persists `NotificationDelivery` audit rows; sender failure never propagates back to the workflow. |
+| `document`    | Implemented. Two integration paths: `DOCUMENT` action type (`DocumentActionExecutor`) renders an invoice-shaped PDF mid-run; `WorkflowCompletedListener` (AFTER_COMMIT + @Async, off by default) generates a post-run summary. Pluggable `StorageService` — `LocalFileStorageService` active, `S3StorageService` wired but stubbed. PDF via OpenPDF 1.4.2. |
 | **Tests**     | Engine slice in place. JUnit 5 + Mockito for unit; Testcontainers Postgres + `okhttp3:mockwebserver` for integration. Base class: `com.automationhub.testsupport.PostgresTestBase` (singleton container). Run with `mvn test`. |
 
 ## Hard rules (always apply)
@@ -40,7 +41,8 @@ Feature modules:
 - **`shared`** primitives (events, exceptions, web utils) → `.claude/modules/shared.md`
 - **`auth`** (registration, login, JWT, `/auth/me`) → `.claude/modules/auth.md`
 - **`workflow`** (CRUD, executor pipeline, idempotency, events) → `.claude/modules/workflow.md`
-- **`notification`** (event listeners, senders — not yet implemented) → `.claude/modules/notification.md`
+- **`notification`** (event listeners, senders, delivery audit) → `.claude/modules/notification.md`
+- **`document`** (PDF generation, storage abstraction, DOCUMENT action + completion listener) → `.claude/modules/document.md`
 
 ## When in doubt
 
