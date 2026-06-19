@@ -1,5 +1,6 @@
 package com.automationhub.shared.exception;
 
+import com.automationhub.workflow.webhook.WebhookAuthenticationException;
 import jakarta.servlet.http.HttpServletRequest;
 import org.springframework.http.HttpStatus;
 import org.springframework.http.ResponseEntity;
@@ -26,6 +27,11 @@ public class GlobalExceptionHandler {
     @ExceptionHandler(InvalidCredentialsException.class)
     public ResponseEntity<ApiError> handleInvalidCredentials(InvalidCredentialsException ex, HttpServletRequest request) {
         return build(HttpStatus.UNAUTHORIZED, ex.getMessage(), request);
+    }
+
+    @ExceptionHandler(WebhookAuthenticationException.class)
+    public ResponseEntity<ApiError> handleWebhookAuth(WebhookAuthenticationException ex, HttpServletRequest request) {
+        return build(HttpStatus.UNAUTHORIZED, "Unauthorized", request);
     }
 
     @ExceptionHandler(MethodArgumentNotValidException.class)

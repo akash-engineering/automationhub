@@ -3,6 +3,7 @@ package com.automationhub.workflow.controller;
 import com.automationhub.infrastructure.security.CurrentUser;
 import com.automationhub.shared.web.PageResponse;
 import com.automationhub.workflow.dto.CreateWorkflowRequest;
+import com.automationhub.workflow.dto.WebhookCredentialsResponse;
 import com.automationhub.workflow.dto.WorkflowResponse;
 import com.automationhub.workflow.service.WorkflowService;
 import jakarta.validation.Valid;
@@ -19,6 +20,7 @@ import org.springframework.web.bind.annotation.RequestMapping;
 import org.springframework.web.bind.annotation.RequestParam;
 import org.springframework.web.bind.annotation.ResponseStatus;
 import org.springframework.web.bind.annotation.RestController;
+import org.springframework.web.servlet.support.ServletUriComponentsBuilder;
 
 import java.util.UUID;
 
@@ -58,5 +60,21 @@ public class WorkflowController {
     @ResponseStatus(HttpStatus.NO_CONTENT)
     public void delete(@PathVariable UUID id) {
         workflowService.delete(id, currentUser.requireId());
+    }
+
+    @PostMapping("/{id}/webhook")
+    public WebhookCredentialsResponse enableWebhook(@PathVariable UUID id) {
+        String secret = workflowService.rotateWebhookSecret(id, currentUser.requireId());
+        String url = ServletUriComponentsBuilder.fromCurrentContextPath()
+                .path("/webhooks/workflows/{id}")
+                .buildAndExpand(id)
+                .toUriString();
+        return new WebhookCredentialsResponse(secret, url);
+    }
+
+    @DeleteMapping("/{id}/webhook")
+    @ResponseStatus(HttpStatus.NO_CONTENT)
+    public void disableWebhook(@PathVariable UUID id) {
+        workflowService.disableWebhook(id, currentUser.requireId());
     }
 }

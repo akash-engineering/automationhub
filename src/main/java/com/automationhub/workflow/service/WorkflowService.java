@@ -14,6 +14,8 @@ import org.springframework.data.domain.Pageable;
 import org.springframework.stereotype.Service;
 import org.springframework.transaction.annotation.Transactional;
 
+import java.security.SecureRandom;
+import java.util.Base64;
 import java.util.List;
 import java.util.UUID;
 
@@ -66,6 +68,28 @@ public class WorkflowService {
         Workflow workflow = requireOwned(id, ownerId);
         actionRepository.deleteByWorkflowId(workflow.getId());
         workflowRepository.delete(workflow);
+    }
+
+    @Transactional
+    public String rotateWebhookSecret(UUID workflowId, UUID ownerId) {
+        Workflow workflow = requireOwned(workflowId, ownerId);
+        String secret = generateSecret();
+        workflow.setWebhookSecret(secret);
+        workflowRepository.save(workflow);
+        return secret;
+    }
+
+    @Transactional
+    public void disableWebhook(UUID workflowId, UUID ownerId) {
+        Workflow workflow = requireOwned(workflowId, ownerId);
+        workflow.setWebhookSecret(null);
+        workflowRepository.save(workflow);
+    }
+
+    private static String generateSecret() {
+        byte[] bytes = new byte[32];
+        new SecureRandom().nextBytes(bytes);
+        return Base64.getUrlEncoder().withoutPadding().encodeToString(bytes);
     }
 
     private Workflow requireOwned(UUID id, UUID ownerId) {

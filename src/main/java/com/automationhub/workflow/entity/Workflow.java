@@ -26,4 +26,7 @@ public class Workflow extends BaseEntity {
 
     @Column(nullable = false)
     private UUID ownerId;
+
+    @Column(name = "webhook_secret")
+    private String webhookSecret;
 }
