@@ -2,6 +2,8 @@
 
 A modular monolith automation platform built with Spring Boot 3 and Java 21.
 
+See [`docs/architecture/modules.md`](docs/architecture/modules.md) for the module graph and runtime event flow (Mermaid, renders on GitHub).
+
 ## Modules
 
 - **shared** — Cross-cutting primitives: domain events, exception handling, web utilities (correlation-ID filter, page wrapper).
