@@ -64,6 +64,10 @@ Inside compose, `DB_URL` uses host `postgres` (the service name). For local-with
 | POST   | `/workflows/{id}/execute`                                    | bearer + `Idempotency-Key` header |
 | GET    | `/workflows/{id}/executions`                                 | bearer |
 | GET    | `/workflows/{id}/executions/{eid}/logs`                      | bearer |
+| POST   | `/workflows/{id}/webhook`                                    | bearer — rotates the webhook secret, returns it **once** |
+| DELETE | `/workflows/{id}/webhook`                                    | bearer — disables the webhook |
+| POST   | `/webhooks/workflows/{id}`                                   | **public**, HMAC-signed (`X-Webhook-Timestamp`, `X-Webhook-Signature: sha256=<hex>`) |
+| GET    | `/notifications/executions/{executionId}`                    | bearer |
 
 ## End-to-end smoke test
 
@@ -96,10 +100,31 @@ curl -sf -H "Authorization: Bearer $TOKEN" http://localhost:8080/workflows/$WF/e
 
 Re-running the `POST .../execute` with the same `Idempotency-Key` returns the original execution and does not create a new run.
 
+## Webhook smoke test
+
+```bash
+# (assumes TOKEN + WF from the previous block)
+ENABLE=$(curl -sf -X POST http://localhost:8080/workflows/$WF/webhook -H "Authorization: Bearer $TOKEN")
+SECRET=$(echo "$ENABLE" | python -c "import sys,json;print(json.load(sys.stdin)['secret'])")
+
+TS=$(date +%s); BODY='{"event":"invoice.paid"}'
+SIG=$(printf "%s.%s" "$TS" "$BODY" | openssl dgst -sha256 -hmac "$SECRET" -r | cut -d' ' -f1)
+
+curl -sf -X POST http://localhost:8080/webhooks/workflows/$WF \
+  -H "X-Webhook-Timestamp: $TS" -H "X-Webhook-Signature: sha256=$SIG" \
+  -H "Idempotency-Key: hook-001" -H "Content-Type: application/json" \
+  -d "$BODY"
+```
+
+The HMAC covers `timestamp + "." + rawBody`. Replays with the same `Idempotency-Key` (and a fresh signature, since the timestamp changes) return the original `executionId`. Any signature/timestamp/secret failure → generic 401 `{"message":"Unauthorized"}`.
+
 ## Test conventions
 
-- Spring Boot test starters already on the classpath (`spring-boot-starter-test`, `spring-security-test`).
-- Unit tests: plain JUnit 5 + Mockito. No Spring context.
-- Slice tests: `@WebMvcTest`, `@DataJpaTest`, `@JsonTest` — prefer these over full `@SpringBootTest` when a single layer is under test.
-- Integration tests that need real Postgres: Testcontainers (not yet wired up — add the dependency when the first integration test lands).
-- Test class names mirror the type under test with a `Test` suffix; one behavior per `@Test` method.
+- Run with `mvn test`.
+- Unit tests: plain JUnit 5 + Mockito + AssertJ. No Spring context. Examples: `ActionExecutorRegistryTest`, `ExecutionServiceIdempotencyTest`.
+- HTTP-touching unit tests: `okhttp3:mockwebserver` (already a test dep). Never call real external URLs from tests.
+- Slice tests when only one layer is under test: `@WebMvcTest`, `@DataJpaTest`, `@JsonTest`.
+- Integration tests that need real Postgres: extend `com.automationhub.testsupport.PostgresTestBase`. That base class spins up a singleton `PostgreSQLContainer("postgres:16-alpine")` (shared across test classes in the same JVM) and wires `spring.datasource.*` via `@DynamicPropertySource`. It also forces `spring.jpa.hibernate.ddl-auto=create-drop` so each fresh JVM gets a clean schema.
+- Integration tests must clear tables in `@BeforeEach` (Spring's auto-rollback doesn't apply when the service under test opens its own TX). Use `repository.deleteAllInBatch()` for speed.
+- Async + `AFTER_COMMIT` listeners run in the real executor pool during tests — use `org.awaitility.Awaitility` to wait for terminal state instead of `Thread.sleep`.
+- Test class names mirror the type under test with `Test` for unit, `IntegrationTest` for Testcontainers-backed.

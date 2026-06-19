@@ -15,10 +15,13 @@ Framework wiring lives under `com.automationhub.infrastructure.*`. No business l
 
 - **`SecurityConfig`**: stateless filter chain. `permitAll` for:
   - `POST /auth/register`, `POST /auth/login`
+  - `POST /webhooks/**` (HMAC-verified inside the controller — see `workflow.webhook`)
   - `/swagger-ui.html`, `/swagger-ui/**`, `/v3/api-docs`, `/v3/api-docs/**`
   - `/actuator/health`
 
   Everything else (including `GET /auth/me`, all `/workflows*`) requires authentication. CSRF disabled (stateless API). `JwtAuthFilter` runs before `UsernamePasswordAuthenticationFilter`.
+
+  Public endpoints that need their own authentication (e.g., webhook HMAC) must verify in the controller/service layer and throw an exception that maps to a **generic** 401 in `GlobalExceptionHandler` — never leak which check failed.
 
   Missing/invalid token → 401 via `exceptionHandling(eh -> eh.authenticationEntryPoint(new HttpStatusEntryPoint(HttpStatus.UNAUTHORIZED)))`. Without this, Spring Security 6 defaults to 403 for missing auth, which we don't want.
 

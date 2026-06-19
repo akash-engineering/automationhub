@@ -11,8 +11,9 @@ Base package: `com.automationhub`. Modules: `shared`, `infrastructure`, `auth`, 
 | `shared`      | Implemented. Marker `DomainEvent`, `ApiError`, common exceptions, `PageResponse`, MDC. |
 | `infrastructure` | Implemented. Persistence (`BaseEntity` + auditing), security (JWT filter, `CurrentUser`, BCrypt), async executor, OpenAPI, Jackson. |
 | `auth`        | Implemented end-to-end. `POST /auth/register`, `POST /auth/login`, `GET /auth/me`.     |
-| `workflow`    | Implemented end-to-end. CRUD, async execution on `automationHubTaskExecutor`, per-step `ExecutionLog`, idempotency via `Idempotency-Key` header, publishes `WorkflowCompletedEvent` / `WorkflowFailedEvent`. |
-| `notification`| **Not implemented.** Listener stubs only — wire `@TransactionalEventListener(AFTER_COMMIT) @Async` consumers next. |
+| `workflow`    | Implemented end-to-end. CRUD, async execution on `automationHubTaskExecutor`, per-step `ExecutionLog`, idempotency via `Idempotency-Key` header (race-safe via `REQUIRES_NEW` + DIV catch), HMAC-signed public webhook trigger, publishes `WorkflowCompletedEvent` / `WorkflowFailedEvent`. |
+| `notification`| Implemented. `@TransactionalEventListener(AFTER_COMMIT) @Async` listener dispatches to `SlackSender` / `EmailSender` (log-only senders), persists `NotificationDelivery` audit rows; sender failure never propagates back to the workflow. |
+| **Tests**     | Engine slice in place. JUnit 5 + Mockito for unit; Testcontainers Postgres + `okhttp3:mockwebserver` for integration. Base class: `com.automationhub.testsupport.PostgresTestBase` (singleton container). Run with `mvn test`. |
 
 ## Hard rules (always apply)
 

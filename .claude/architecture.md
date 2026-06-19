@@ -23,12 +23,12 @@ com.automationhub
 ├── auth/                              — users, registration, login, token issuance
 │   ├── controller/ service/ repository/ entity/ dto/
 │
-├── workflow/                          — workflows, actions, executions, idempotency
-│   ├── controller/ service/ repository/ entity/ dto/ event/ idempotency/
+├── workflow/                          — workflows, actions, executions, idempotency, webhooks
+│   ├── controller/ service/ repository/ entity/ dto/ event/ idempotency/ webhook/
 │   └── service/action/                — pluggable ActionExecutor implementations
 │
-└── notification/                      — downstream consumer of workflow events (NOT YET IMPLEMENTED)
-    └── listener/ service/ sender/ dto/  (planned)
+└── notification/                      — downstream consumer of workflow events
+    └── listener/ service/ sender/ entity/ repository/ dto/
 ```
 
 ## Future modules (not yet created)
@@ -61,13 +61,13 @@ workflow.ExecutionRunner            ──publish──▶  WorkflowCompletedEve
   (inside the finalize TX)                              │
                                                        │ @TransactionalEventListener(AFTER_COMMIT) + @Async
                                                        ▼
-                                          notification.WorkflowEventListener   (not yet implemented)
+                                          notification.WorkflowEventListener
                                                        │
                                                        ▼
-                                          notification.NotificationService
+                                          notification.NotificationService   (persists NotificationDelivery)
                                                        │
                                                        ▼
-                                          notification.sender.{Slack,Email}Sender
+                                          notification.sender.{Slack,Email}Sender   (log-only, swap point)
 ```
 
 `ExecutionRunner` lives on `automationHubTaskExecutor`; events are published inside the transaction that flips status to `COMPLETED`/`FAILED`, so `AFTER_COMMIT` consumers fire only once the state change is durable.

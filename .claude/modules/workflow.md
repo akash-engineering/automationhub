@@ -8,23 +8,27 @@ Owns workflows, their actions, executions, execution logs, the pluggable action 
 workflow/
 ├── controller/    WorkflowController        (/workflows)
 │                  ExecutionController       (/workflows/{id}/execute, /executions, /executions/{eid}/logs)
-├── service/       WorkflowService           (CRUD)
+│                  WebhookController         (/webhooks/workflows/{id} — public, HMAC-signed)
+├── service/       WorkflowService           (CRUD + webhook secret rotate/disable)
 │                  ExecutionService          (sync entrypoint: ownership, idempotency, schedule async run)
 │                  ExecutionRunner           (@Async runner)
 │   └── action/    ActionExecutor, ActionResult, ActionExecutorRegistry,
 │                  SlackActionExecutor, EmailActionExecutor, HttpActionExecutor
+├── webhook/       WebhookSignatureVerifier, WebhookTriggerService,
+│                  WebhookAuthenticationException
 ├── repository/    WorkflowRepository, ActionRepository, ExecutionRepository,
 │                  ExecutionLogRepository, IdempotencyKeyRepository
-├── entity/        Workflow, Action, ActionType, Execution, ExecutionStatus, ExecutionLog
+├── entity/        Workflow (incl. webhookSecret), Action, ActionType,
+│                  Execution, ExecutionStatus, ExecutionLog
 ├── dto/           CreateWorkflowRequest, ActionSpec, WorkflowResponse,
-│                  ExecutionResponse, ExecutionLogResponse
+│                  ExecutionResponse, ExecutionLogResponse, WebhookCredentialsResponse
 ├── event/         WorkflowCompletedEvent, WorkflowFailedEvent
 └── idempotency/   IdempotencyKey, IdempotencyService
 ```
 
 ## Entities (all extend `BaseEntity`)
 
-- **`Workflow`** — `name : String`, `ownerId : UUID`. No `@ManyToOne User`.
+- **`Workflow`** — `name : String`, `ownerId : UUID`, `webhookSecret : String` (nullable; presence ⇒ webhook trigger enabled). No `@ManyToOne User`.
 - **`Action`** — `workflowId : UUID`, `type : ActionType` (`SLACK | EMAIL | HTTP`, `@Enumerated(STRING)`, column `action_type`), `config : String` (JSON blob, `TEXT` column), `order : int` (column `execution_order` — `order` is a SQL reserved word).
 - **`Execution`** — `workflowId : UUID`, `status : ExecutionStatus` (`PENDING | RUNNING | COMPLETED | FAILED`).
 - **`ExecutionLog`** — `executionId : UUID`, `actionOrder : int`, `status : ExecutionStatus`, `message : String`.
@@ -66,6 +70,8 @@ Core extension point.
 - `list(UUID ownerId, Pageable) : PageResponse<WorkflowResponse>` — owner-scoped paged list (each response is hydrated with its actions).
 - `get(UUID id, UUID ownerId) : WorkflowResponse` — `ResourceNotFoundException` if missing or not owned.
 - `delete(UUID id, UUID ownerId)` — deletes the workflow's actions then the workflow itself.
+- `rotateWebhookSecret(UUID workflowId, UUID ownerId) : String` — `SecureRandom` 32 bytes → base64url, stored on the workflow, returned **once**. Rotating revokes the prior secret.
+- `disableWebhook(UUID workflowId, UUID ownerId)` — clears the secret. Subsequent webhook fires get a generic 401.
 
 ### `ExecutionService` (sync entry point, called from the controller thread)
 1. Look up workflow by `(id, ownerId)`; 404 if missing.
@@ -92,8 +98,27 @@ Runs in a worker thread *after* the entry-point TX commits, so the `Execution(RU
 
 - **`IdempotencyKey`** entity (see Entities above).
 - **`IdempotencyService`**:
-  - `findExecutionId(key) : Optional<UUID>`
-  - `record(key, ownerId, workflowId, executionId) : UUID` — calls `saveAndFlush`. On `DataIntegrityViolationException`, looks up the existing row by key and returns its `executionId`. Caller compares the returned id against the one it tried to record; if they differ, the caller is the losing side of a race and should return the winner's execution.
+  - `findExecutionId(key) : Optional<UUID>` — plain SELECT, joins the caller's TX.
+  - `record(key, ownerId, workflowId, executionId) : UUID` — `@Transactional(propagation = REQUIRES_NEW)`. Calls `saveAndFlush`. Lets `DataIntegrityViolationException` propagate; **does not** swallow it.
+
+### Why `REQUIRES_NEW` + caller-side catch
+
+A unique-constraint violation aborts the Postgres transaction it happens in (every subsequent statement returns `25P02 current transaction is aborted`). If `record` ran in the caller's TX, the catch block's recovery `findByKey` would fail, and the outer commit would fail too — the losing thread saw a `JpaSystemException` 500 instead of the winner's execution ID. The integration test `ExecutionServiceRaceIntegrationTest` was the one that surfaced this; do not regress.
+
+Fix shape (live in `ExecutionService.execute`):
+
+```java
+Execution execution = executionRepository.save(...);   // queued in caller's TX
+try {
+    idempotencyService.record(idempotencyKey, ownerId, workflowId, execution.getId());
+} catch (DataIntegrityViolationException raceLost) {
+    executionRepository.delete(execution);             // clean up the orphan we just queued
+    UUID priorId = idempotencyService.findExecutionId(idempotencyKey).orElseThrow(() -> raceLost);
+    return ExecutionResponse.from(executionRepository.findById(priorId).orElseThrow(...));
+}
+```
+
+Known small race window: the inner `REQUIRES_NEW` commits the `idempotency_keys` row before the outer TX commits the `Execution` row. A third caller racing in this exact window can read the idempotency row, then fail to find the execution. Acceptable for now — caller can retry. If this ever bites, the fix is to insert the idempotency row with `executionId = some_pregenerated_uuid` first and create the execution with that UUID after winning.
 
 ## Events (records, implement `DomainEvent`)
 
@@ -107,7 +132,9 @@ public record WorkflowFailedEvent(UUID workflowId, UUID executionId, UUID ownerI
 
 UUIDs + primitives only. No entities. Consumers re-fetch what they need from their own repositories.
 
-## Endpoints (all JWT-secured)
+## Endpoints
+
+JWT-secured unless marked **public**.
 
 | Method | Path                                                         | Status | Notes |
 |--------|--------------------------------------------------------------|--------|-------|
@@ -118,8 +145,20 @@ UUIDs + primitives only. No entities. Consumers re-fetch what they need from the
 | POST   | `/workflows/{id}/execute`                                    | 202    | header `Idempotency-Key` (optional but recommended) |
 | GET    | `/workflows/{id}/executions?page=N&size=M`                   | 200    | `PageResponse<ExecutionResponse>`, newest first |
 | GET    | `/workflows/{id}/executions/{executionId}/logs`              | 200    | `List<ExecutionLogResponse>`, ordered by `actionOrder` |
+| POST   | `/workflows/{id}/webhook`                                    | 200    | rotates secret; returns `WebhookCredentialsResponse(secret, url)` **once** |
+| DELETE | `/workflows/{id}/webhook`                                    | 204    | clears the secret |
+| POST   | `/webhooks/workflows/{id}` **(public)**                      | 202    | headers `X-Webhook-Timestamp`, `X-Webhook-Signature: sha256=<hex>`, optional `Idempotency-Key`. Returns `ExecutionResponse`. |
 
-**Not yet built:** the originally-planned external `WebhookController` (`POST /webhooks/{workflowId}`) is intentionally deferred. The same idempotent-execute mechanism lives behind JWT under `POST /workflows/{id}/execute` today; an unauthenticated webhook trigger can be layered on later by sharing `ExecutionService.execute`.
+## Webhook trigger (`webhook/`, `WebhookController`)
+
+Public, unauthenticated trigger for external systems (payment providers, etc.).
+
+- **`WebhookSignatureVerifier`** — `HMAC-SHA256(secret, timestamp + "." + rawBody)`, hex-encoded. Constant-time compare via `MessageDigest.isEqual`. Timestamp must be within ±5 minutes of server time (replay protection). Returns `boolean` only — never throws and never logs.
+- **`WebhookTriggerService`** — loads `Workflow` by id, checks `webhookSecret` is non-null, verifies signature, then delegates to `ExecutionService.execute(workflowId, workflow.getOwnerId(), idempotencyKey)`. The execution runs as the workflow's owner — webhook-triggered runs are indistinguishable from JWT-triggered runs once past the controller.
+- **`WebhookAuthenticationException`** — thrown for ALL failure modes (unknown workflow, missing secret, bad timestamp, bad signature). Mapped to a single generic 401 `{"message":"Unauthorized"}` in `GlobalExceptionHandler` so callers can't tell which check failed.
+- **Raw body handling** — controller accepts `@RequestBody(required = false) String body`. Never let Jackson parse before HMAC verification, or the bytes you HMAC won't match the bytes the caller signed.
+
+The webhook **does not** pipe its payload to action executors — actions use their stored config. Payload-aware actions are a separate feature.
 
 ## What does **not** belong here
 

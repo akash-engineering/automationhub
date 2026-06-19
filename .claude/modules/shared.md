@@ -18,7 +18,8 @@ Cross-cutting primitives. No business logic. Everything here is depended on by e
 - **`GlobalExceptionHandler`** — `@RestControllerAdvice`. Current mappings:
   - `ResourceNotFoundException` → 404
   - `EmailAlreadyExistsException` → 409
-  - `InvalidCredentialsException` → 401
+  - `InvalidCredentialsException` → 401 (message kept generic — see auth rule)
+  - `WebhookAuthenticationException` → 401 with body `{"message":"Unauthorized"}`. Used for ALL webhook auth failures (bad signature, missing secret, expired timestamp, unknown workflow) — the handler overwrites the exception's message to a single literal so callers can't tell which check failed.
   - `MethodArgumentNotValidException` → 400 (joins all field errors with `;`)
   - fallback `Exception` → 500
 
