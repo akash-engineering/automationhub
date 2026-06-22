@@ -41,3 +41,10 @@ automationhub:
 
 slack:
   webhook-url: ${SLACK_WEBHOOK_URL:}
+
+stripe:
+  api-key: ${STRIPE_API_KEY:}
+  webhook-secret: ${STRIPE_WEBHOOK_SECRET:}
+  checkout:
+    success-url: ${STRIPE_CHECKOUT_SUCCESS_URL:http://localhost:8080/checkout/success}
+    cancel-url: ${STRIPE_CHECKOUT_CANCEL_URL:http://localhost:8080/checkout/cancel}

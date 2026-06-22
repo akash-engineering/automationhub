@@ -23,10 +23,10 @@ import java.util.UUID;
 @Builder
 public class NotificationDelivery extends BaseEntity {
 
-    @Column(nullable = false)
+    @Column
     private UUID executionId;
 
-    @Column(nullable = false)
+    @Column
     private UUID workflowId;
 
     @Column(nullable = false)

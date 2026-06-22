@@ -1,6 +1,8 @@
 package com.automationhub.shared.exception;
 
+import com.automationhub.payment.exception.StripeNotConfiguredException;
 import com.automationhub.workflow.webhook.WebhookAuthenticationException;
+import com.stripe.exception.StripeException;
 import jakarta.servlet.http.HttpServletRequest;
 import org.springframework.http.HttpStatus;
 import org.springframework.http.ResponseEntity;
@@ -32,6 +34,16 @@ public class GlobalExceptionHandler {
     @ExceptionHandler(WebhookAuthenticationException.class)
     public ResponseEntity<ApiError> handleWebhookAuth(WebhookAuthenticationException ex, HttpServletRequest request) {
         return build(HttpStatus.UNAUTHORIZED, "Unauthorized", request);
+    }
+
+    @ExceptionHandler(StripeNotConfiguredException.class)
+    public ResponseEntity<ApiError> handleStripeNotConfigured(StripeNotConfiguredException ex, HttpServletRequest request) {
+        return build(HttpStatus.SERVICE_UNAVAILABLE, ex.getMessage(), request);
+    }
+
+    @ExceptionHandler(StripeException.class)
+    public ResponseEntity<ApiError> handleStripe(StripeException ex, HttpServletRequest request) {
+        return build(HttpStatus.BAD_GATEWAY, "Stripe API error: " + ex.getMessage(), request);
     }
 
     @ExceptionHandler(MethodArgumentNotValidException.class)
