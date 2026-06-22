@@ -38,3 +38,6 @@ automationhub:
   jwt:
     secret: ${JWT_SECRET:replace-with-a-long-random-base64-encoded-secret-at-least-32-bytes-long-please}
     expiration: ${JWT_EXPIRATION:3600000}
+
+slack:
+  webhook-url: ${SLACK_WEBHOOK_URL:}

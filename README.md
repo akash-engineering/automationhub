@@ -10,7 +10,7 @@ See [`docs/architecture/modules.md`](docs/architecture/modules.md) for the modul
 - **infrastructure** — Framework configuration: async executor, OpenAPI, Jackson, Spring Security + JWT, JPA base entity / auditing.
 - **auth** — User registration, login, and JWT issuance.
 - **workflow** — Workflow CRUD, JWT-protected execute + HMAC-signed public webhook trigger, asynchronous execution on a named executor, pluggable action executors (Slack / Email / HTTP / Document), and race-safe idempotency.
-- **notification** — `@TransactionalEventListener(AFTER_COMMIT)` consumer of workflow events, dispatches via Slack / Email senders, persists a `NotificationDelivery` audit row per attempt; sender failures never propagate back to the workflow.
+- **notification** — `@TransactionalEventListener(AFTER_COMMIT)` consumer of workflow events, dispatches via Slack / Email senders, persists a `NotificationDelivery` audit row per attempt; sender failures never propagate back to the workflow. Slack is wired to a real Incoming Webhook when `SLACK_WEBHOOK_URL` is set (and falls back to log-only otherwise); the same applies to the `SLACK` action type in the workflow module.
 - **document** — Generates invoice-shaped PDFs (OpenPDF) and stores them via a pluggable `StorageService` (`local` active, `s3` stubbed). Two integration paths: a `DOCUMENT` action type that runs inside a workflow, and an opt-in completion listener that produces a post-run summary.
 
 ## Tests
