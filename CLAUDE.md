@@ -2,7 +2,7 @@
 
 Spring Boot 3 modular monolith. Java 21, Maven, PostgreSQL, JPA, Spring Security + JWT, springdoc-openapi, Lombok, Docker Compose.
 
-Base package: `com.automationhub`. Modules: `shared`, `infrastructure`, `auth`, `workflow`, `notification`, `document`. Future (do not create yet): `payment`, `sync`.
+Base package: `com.automationhub`. Modules: `shared`, `infrastructure`, `auth`, `workflow`, `notification`, `document`, `payment`. Future (do not create yet): `sync`.
 
 ## Module status
 
@@ -14,6 +14,7 @@ Base package: `com.automationhub`. Modules: `shared`, `infrastructure`, `auth`, 
 | `workflow`    | Implemented end-to-end. CRUD, async execution on `automationHubTaskExecutor`, per-step `ExecutionLog`, idempotency via `Idempotency-Key` header (race-safe via `REQUIRES_NEW` + DIV catch), HMAC-signed public webhook trigger, publishes `WorkflowCompletedEvent` / `WorkflowFailedEvent`. `SlackActionExecutor` posts to Slack when `slack.webhook-url` is set (simulated success otherwise); `EmailActionExecutor` is log-only; `HttpActionExecutor` and `DocumentActionExecutor` do real work. |
 | `notification`| Implemented. `@TransactionalEventListener(AFTER_COMMIT) @Async` listener dispatches to `SlackSender` / `EmailSender`, persists `NotificationDelivery` audit rows; sender failure never propagates back to the workflow. **Slack is live** when `slack.webhook-url` (`SLACK_WEBHOOK_URL`) is set — POSTs to a Slack Incoming Webhook; blank → log-only fallback. Email remains log-only. |
 | `document`    | Implemented. Two integration paths: `DOCUMENT` action type (`DocumentActionExecutor`) renders an invoice-shaped PDF mid-run; `WorkflowCompletedListener` (AFTER_COMMIT + @Async, off by default) generates a post-run summary. Pluggable `StorageService` — `LocalFileStorageService` active, `S3StorageService` wired but stubbed. PDF via OpenPDF 1.4.2. |
+| `payment`     | Implemented. Stripe Checkout for subscriptions: `Plan` / `Subscription` / `Payment` / `ProcessedStripeEvent` entities; `PaymentController` exposes `GET /plans`, `POST /checkout-sessions`, `GET /subscriptions`. `StripeWebhookController` at `POST /webhooks/stripe` verifies signatures via `Webhook.constructEvent`. Webhook idempotency uses the `REQUIRES_NEW`-style unique-constraint pattern on `stripe_event_id`. Publishes `PaymentSucceededEvent` on `invoice.payment_succeeded`; consumed by `notification.PaymentEventListener` (AFTER_COMMIT + @Async). All live Stripe calls guarded by `stripe.api-key` — app boots and tests pass with it unset. SDK: `com.stripe:stripe-java:28.4.0`. |
 | **Tests**     | Engine slice in place. JUnit 5 + Mockito for unit; Testcontainers Postgres + `okhttp3:mockwebserver` for integration. Base class: `com.automationhub.testsupport.PostgresTestBase` (singleton container). Run with `mvn test`. |
 
 ## Hard rules (always apply)
