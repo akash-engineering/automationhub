@@ -46,3 +46,9 @@ logs/
 # Environment
 .env
 .env.local
+
+# Claude Code internal docs — not for public repo
+.claude/
+CLAUDE.md
+docs/api-verification-report.md
+docs/demo-readiness.md
