@@ -17,7 +17,7 @@ Three self-contained portfolio projects, one deployable — run everything with 
 
 ---
 
-## Portfolio Project 1 — Workflow Automation Engine
+## Workflow Automation Engine
 
 **What it does:** Users define multi-step workflows and trigger them via a JWT-secured API or a public HMAC-signed webhook. Each step runs one of four action types. Execution is asynchronous, race-safe, and fully auditable.
 
@@ -50,7 +50,7 @@ Three self-contained portfolio projects, one deployable — run everything with 
 
 ---
 
-## Portfolio Project 2 — PDF Invoice Generation
+## PDF Invoice Generation
 
 **What it does:** A `DOCUMENT` action inside any workflow generates a PDF invoice and stores it. Documents are owner-scoped and streamable via a dedicated endpoint. Storage backend is pluggable.
 
@@ -83,7 +83,7 @@ Three self-contained portfolio projects, one deployable — run everything with 
 
 ---
 
-## Portfolio Project 3 — Stripe Subscription Billing
+## Stripe Subscription Billing
 
 **What it does:** Full subscription lifecycle backed by Stripe. Users check out via a hosted Stripe Checkout page; incoming Stripe webhooks update subscription state and trigger downstream notifications — all idempotently and with real signature verification.
 
