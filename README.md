@@ -5,6 +5,18 @@ Three self-contained portfolio projects, one deployable — run everything with 
 
 ---
 
+## Features
+
+- **Workflow automation** — Define a sequence of steps (send a message, call an API, generate a document) and run them on demand or automatically when an external event arrives. Every run is logged so you can see exactly what happened and when.
+- **Webhook triggers** — External tools (payment processors, CRMs, monitoring systems) can trigger a workflow by sending a signed HTTP request. No manual intervention needed.
+- **PDF generation** — Workflows can produce invoice-style PDF documents automatically and store them for later download.
+- **Slack notifications** — Get a Slack message whenever a workflow completes, fails, or a payment goes through. Configurable per deployment.
+- **Subscription billing** — Users can subscribe to plans via Stripe Checkout. Payment events (success, failure, cancellation) are processed automatically and reflected in real time.
+- **Idempotent everything** — Duplicate triggers, retried webhooks, and concurrent requests are all handled safely — the same operation always produces the same result, never double-charging or double-executing.
+- **Secure by default** — All user-facing endpoints require a signed JWT. Webhooks require a per-workflow secret. The app boots and stays usable even when third-party keys (Stripe, Slack) are not configured.
+
+---
+
 ## Portfolio Project 1 — Workflow Automation Engine
 
 **What it does:** Users define multi-step workflows and trigger them via a JWT-secured API or a public HMAC-signed webhook. Each step runs one of four action types. Execution is asynchronous, race-safe, and fully auditable.
