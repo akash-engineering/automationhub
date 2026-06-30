@@ -1,64 +1,30 @@
 # Module: `auth`
 
-Owns users, registration, login, JWT issuance, and the "who am I" endpoint. The **only** module that knows about the `User` entity. Other modules reference users by `UUID` (the `BaseEntity.id`).
+Owns users, registration, login, JWT issuance. Only module that knows the `User` entity.
 
-## Layout
+## Key classes
 
-```
-auth/
-├── controller/   AuthController    (/auth/register, /auth/login, /auth/me)
-├── service/      AuthService
-├── repository/   UserRepository    (JpaRepository<User, UUID>)
-├── entity/       User, Role
-└── dto/          RegisterRequest, LoginRequest, AuthResponse, MeResponse
-```
+- `AuthController` — `/auth/register`, `/auth/login`, `/auth/me`.
+- `AuthService` — register / login / me; BCrypt + `JwtService`.
+- `User`, `Role` (`USER`, `ADMIN`).
+- `UserRepository` — `findByEmail`.
 
-## Entities
+## DTOs (records)
 
-- **`User`** extends `BaseEntity`: `email` (unique, not null), `passwordHash` (not null), `role : Role` (`@Enumerated(STRING)`). Table: `users`.
-- **`Role`**: `USER`, `ADMIN`. Add roles by adding enum constants — don't introduce a separate `roles` table unless multi-role support becomes a real requirement.
+- `RegisterRequest` (`@Email`, `@Size(min=8)` password).
+- `LoginRequest`.
+- `AuthResponse` — `static bearer(String token)`.
+- `MeResponse` — `static from(User)`.
 
-## DTOs (all records)
+## Exceptions
 
-- **`RegisterRequest(@Email @NotBlank String email, @NotBlank @Size(min=8) String password)`**
-- **`LoginRequest(@Email @NotBlank String email, @NotBlank String password)`**
-- **`AuthResponse(String token, String tokenType)`** with `static bearer(String token)`.
-- **`MeResponse(UUID id, String email, Role role)`** with `static from(User user)`.
-
-## Service contract — `AuthService`
-
-- **`register(RegisterRequest)`** — lowercase email, reject duplicates with `EmailAlreadyExistsException` (→ 409), BCrypt-hash the password, save `User(role=USER)`, issue JWT via `JwtService.generateToken(user.getId(), user.getEmail(), user.getRole())`, return `AuthResponse.bearer(...)`.
-- **`login(LoginRequest)`** — lowercase email, lookup, `PasswordEncoder.matches`. Either missing user or wrong password → `InvalidCredentialsException` (→ 401) with a generic "Invalid credentials" message — **does not leak which field was wrong**.
-- **`me(UUID userId)`** — fetch user, return `MeResponse.from(...)`. Throws `ResourceNotFoundException` if the JWT subject doesn't resolve (shouldn't normally happen for a valid token).
+- `EmailAlreadyExistsException` → 409.
+- `InvalidCredentialsException` → 401, generic `"Invalid credentials"` (doesn't leak which field was wrong).
 
 ## JWT shape
 
-- **Subject** = user UUID (string).
-- **Claims** = `email` (string), `role` (`Role.name()`).
-- Signed HS-family via `JwtService` (HMAC key from `automationhub.jwt.secret`, ≥32 UTF-8 bytes).
-- Expiry = `automationhub.jwt.expiration` ms from issue time.
+Subject = user UUID; claims = `email`, `role`. Signed with `automationhub.jwt.secret` (≥32 bytes UTF-8). See `infrastructure.security.JwtService`.
 
 ## Endpoints
 
-| Method | Path             | Auth   | Status | Body / Returns                |
-|--------|------------------|--------|--------|-------------------------------|
-| POST   | `/auth/register` | public | 201    | `AuthResponse`                |
-| POST   | `/auth/login`    | public | 200    | `AuthResponse`                |
-| GET    | `/auth/me`       | bearer | 200    | `MeResponse`                  |
-
-Only `POST /auth/register` and `POST /auth/login` are on `SecurityConfig`'s `permitAll` list — `/auth/me` requires a valid token. Missing/invalid token → 401 (via `HttpStatusEntryPoint(UNAUTHORIZED)`).
-
-## Exception → status mapping
-
-Added to the shared `GlobalExceptionHandler`:
-
-| Exception                          | HTTP |
-|------------------------------------|------|
-| `EmailAlreadyExistsException`      | 409  |
-| `InvalidCredentialsException`      | 401  |
-
-## What does **not** belong here
-
-- Token validation / filter wiring — lives in `infrastructure.security.JwtAuthFilter`.
-- Authorization rules for other modules — those modules define their own access checks (using `CurrentUser`).
-- Any reference to `Workflow`, notifications, etc.
+`POST /auth/register` + `POST /auth/login` are public via `SecurityConfig`'s `permitAll`. `GET /auth/me` requires bearer.

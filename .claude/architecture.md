@@ -1,83 +1,29 @@
 # Architecture
 
-## Style
+Modular monolith. One Spring Boot deployable. Each module under `com.automationhub.*` owns its controllers / services / repositories / entities / DTOs / events.
 
-Modular monolith. One deployable, internally split by **business module**. Each module is a top-level package under `com.automationhub` and owns its controllers, services, repositories, entities, DTOs, and (where relevant) events. Modules talk to each other **only via Spring `ApplicationEvent`s** — never by injecting another module's service.
-
-## Package layout
-
-```
-com.automationhub
-├── AutomationHubApplication           — @SpringBootApplication, main()
-│
-├── shared/                            — cross-cutting primitives, no business logic
-│   ├── event/                         — DomainEvent (marker), EventType
-│   ├── exception/                     — ApiError, ResourceNotFoundException, GlobalExceptionHandler
-│   └── web/                           — PageResponse<T>, MdcCorrelationFilter
-│
-├── infrastructure/                    — framework wiring, no business logic
-│   ├── config/                        — AsyncConfig, OpenApiConfig, JacksonConfig
-│   ├── security/                      — SecurityConfig, JwtService, JwtAuthFilter, CurrentUser
-│   └── persistence/                   — BaseEntity, JpaAuditingConfig
-│
-├── auth/                              — users, registration, login, token issuance
-│   ├── controller/ service/ repository/ entity/ dto/
-│
-├── workflow/                          — workflows, actions, executions, idempotency, webhooks
-│   ├── controller/ service/ repository/ entity/ dto/ event/ idempotency/ webhook/
-│   └── service/action/                — pluggable ActionExecutor implementations
-│
-├── notification/                      — downstream consumer of workflow events
-│   └── listener/ service/ sender/ entity/ repository/ dto/
-│
-└── document/                          — PDF generation + storage abstraction
-    ├── controller/ service/ repository/ entity/ dto/ listener/ storage/
-    └── service/action/                — DocumentActionExecutor (plugs into workflow's SPI)
-```
-
-## Future modules (not yet created)
-
-`payment/`, `sync/` will be added later. Do **not** scaffold them preemptively.
+For the rendered module graph + sequence diagram, see `docs/architecture/modules.md`.
 
 ## Layering inside a module
 
-Standard top-to-bottom flow per module:
-
-```
-controller  →  service  →  repository  →  entity
-                  │
-                  └─ publishes events for other modules
-```
-
-- **Controllers** are thin: deserialize, validate, delegate, serialize. No DB access, no executor logic.
-- **Services** hold transactions (`@Transactional` at the service method, not the repository).
-- **Repositories** are Spring Data interfaces. Custom queries via `@Query` or `JpaSpecificationExecutor`.
-- **Entities** never leak past the service layer — services map entity ↔ DTO.
+`controller → service → repository → entity`. Controllers stay thin (parse / validate / delegate / shape). `@Transactional` lives on service methods.
 
 ## Async boundary
 
-Long-running work (workflow execution, notification dispatch) runs on the named executor `automationHubTaskExecutor` via `@Async`. Sync HTTP handlers must return promptly; queue the work and respond.
+Long-running work (workflow execution, listener dispatch) runs on `automationHubTaskExecutor` via `@Async`. Sync HTTP handlers return promptly.
 
-## Event flow at a glance
+## Event flow
 
-```
-workflow.ExecutionRunner            ──publish──▶  WorkflowCompletedEvent / WorkflowFailedEvent
-  (inside the finalize TX)                              │
-                                                       │ @TransactionalEventListener(AFTER_COMMIT) + @Async
-                                                       ▼
-                              ┌────────────────────────┴────────────────────────┐
-                              ▼                                                 ▼
-              notification.WorkflowEventListener            document.WorkflowCompletedListener
-                              │                              (gated by auto-summary.enabled, default off)
-                              ▼                                                 │
-              notification.NotificationService                                  ▼
-              (persists NotificationDelivery)                  document.DocumentService
-                              │                                (renders PDF, persists Document)
-                              ▼                                                 │
-              notification.sender.{Slack,Email}Sender                           ▼
-              (log-only, swap point)                            document.storage.{Local,S3}StorageService
-```
+Events are published from inside the producing TX. Consumers use `@TransactionalEventListener(AFTER_COMMIT) @Async("automationHubTaskExecutor")` so they fire only after the producer's state change is durable.
 
-`ExecutionRunner` lives on `automationHubTaskExecutor`; events are published inside the transaction that flips status to `COMPLETED`/`FAILED`, so `AFTER_COMMIT` consumers fire only once the state change is durable.
+- `workflow.ExecutionRunner` publishes `WorkflowCompletedEvent` / `WorkflowFailedEvent`
+  - → `notification.WorkflowEventListener` → senders + `NotificationDelivery`
+  - → `document.WorkflowCompletedListener` (gated by `automationhub.document.auto-summary.enabled`, default off) → PDF summary
+- `payment.StripeWebhookService` publishes `PaymentSucceededEvent` on `invoice.payment_succeeded`
+  - → `notification.PaymentEventListener` → senders + `NotificationDelivery`
 
-See `.claude/module-boundaries.md` for the rules that enforce this.
+Events carry UUIDs + primitives + enums only. Consumers re-fetch from their own repos.
+
+## Dependency direction
+
+`shared` and `infrastructure` are foundation — every feature module depends on them, never the reverse. Feature modules communicate via events only, with one documented exception: `document.DocumentActionExecutor` imports `workflow.service.action.ActionExecutor` (SPI) and `workflow.repository.WorkflowRepository` (read-only owner lookup). See `.claude/module-boundaries.md`.

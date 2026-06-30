@@ -1,56 +1,30 @@
 # Module boundaries
 
-These rules are the spine of the modular monolith. Breaking them is how a monolith silently becomes a tangled ball — flag any violation rather than working around it.
+## Hard rules
 
-## The two hard rules
+- **No cross-module service injection.** A bean in `workflow.*` may not inject a bean from `notification.*`, `payment.*`, `auth.*`, etc.
+- **No cross-module JPA relations.** References by `UUID` columns (e.g., `Workflow.ownerId : UUID`, never `@ManyToOne User`).
+- **Events only between feature modules.** Publish a `record implements DomainEvent` via `ApplicationEventPublisher`; consume with `@TransactionalEventListener(AFTER_COMMIT) @Async`.
+- **Events carry UUIDs + primitives + enums only.** No entities, no large payloads. Consumers re-fetch from their own repos.
 
-1. **No cross-module service injection.** A bean in `workflow.*` may not inject a bean from `notification.*`, `auth.*`, etc., and vice versa. Repositories are even more off-limits.
-2. **No cross-module JPA relations.** Reference foreign entities by their `UUID` id. `Workflow.ownerId : UUID` — never `@ManyToOne User`. `Execution.workflowId : UUID` — never `@ManyToOne Workflow`. (Within the same module, `@ManyToOne` is fine when it pulls its weight.)
+## Allowed across modules
 
-## What's allowed across modules
+- `shared.*` and `infrastructure.*` — depended on by every module; never depend back.
+- `infrastructure.security.CurrentUser` — read the authenticated UUID anywhere.
+- Cross-module event-class imports (e.g., `notification.listener.PaymentEventListener` importing `payment.event.PaymentSucceededEvent`). The event class itself is the contract.
 
-- **Events.** A module publishes a `record … implements DomainEvent` via `ApplicationEventPublisher`. Other modules consume it with `@TransactionalEventListener`.
-- **`shared/`** types. Every module may depend on `shared.*` and `infrastructure.*`. Those two never depend on a feature module.
-- **`infrastructure.security.CurrentUser`** for reading the authenticated user's UUID from any controller/service.
+## Documented exception
 
-## Event mechanics
+`document.service.action.DocumentActionExecutor` imports from `workflow`:
+- `workflow.service.action.ActionExecutor` — implements the SPI to register a new action type.
+- `workflow.repository.WorkflowRepository` — read-only lookup to resolve `ownerId` from `Action.workflowId`.
 
-- Events are immutable Java `record`s implementing `com.automationhub.shared.event.DomainEvent`.
-- Events carry **UUIDs only** — no entities, no large payloads. Consumers re-fetch what they need from their own repositories or call out via the event source's public API (which today means: they don't, because the source module exposes nothing public).
-- Publishers call `eventPublisher.publishEvent(new WorkflowCompletedEvent(...))` from within the transaction that produced the change.
-- Consumers annotate listener methods with:
+Rationale + alternatives in `.claude/modules/document.md`.
 
-  ```java
-  @Async
-  @TransactionalEventListener(phase = TransactionPhase.AFTER_COMMIT)
-  public void on(WorkflowCompletedEvent event) { ... }
-  ```
+## Adding cross-module communication
 
-  `AFTER_COMMIT` guarantees the producing transaction is durable before downstream side effects fire; `@Async` decouples the consumer from the producer's request thread.
-
-## Dependency direction
-
-```
-shared          ←──── (everything depends on shared)
-infrastructure  ←──── (every feature module depends on infrastructure)
-
-auth ─────────┐
-workflow ─────┼──── publish events ────▶ notification
-              │                          (notification depends on no feature module)
-```
-
-`auth`, `workflow`, and `notification` are siblings. They never import each other's packages — the compiler is your enforcement mechanism. If you find yourself wanting `import com.automationhub.workflow.something` from inside `notification`, stop and design an event instead.
+New info needs to flow between modules → add a `DomainEvent`. Never a service call. Never a foreign repository injection without a written justification.
 
 ## Why UUIDs instead of relations
 
-- Modules can move to separate schemas (or services) later without untangling FK graphs.
-- Tests in one module don't need fixtures from another.
-- Deletes don't cascade across module boundaries.
-- A "missing" reference (orphaned UUID) is a tolerable state; it surfaces as a 404 at read time, not a JPA exception at write time.
-
-## Checklist when reviewing a cross-module change
-
-- [ ] No `@Autowired` / constructor param of a foreign module's bean.
-- [ ] No `@ManyToOne` / `@OneToMany` to a foreign module's entity.
-- [ ] If new info needs to flow between modules: add a `DomainEvent`, not a method call.
-- [ ] The event carries only UUIDs (+ enums/timestamps), no entities.
+Modules can split into separate schemas (or services) later without untangling FK graphs. Tests in one module don't need fixtures from another. A missing reference surfaces as a 404 at read time, not a JPA exception at write time.

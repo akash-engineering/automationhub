@@ -1,54 +1,45 @@
-# Coding conventions
+# Conventions
 
-## Java & language
+## Java
 
-- Target **Java 21**. Prefer records, pattern matching, `var` for obvious local types, text blocks for SQL/JSON literals.
-- One public type per file. File name matches type name.
-- No wildcard imports.
+- Java 21. Records, pattern matching, `var` for obvious locals, text blocks for SQL/JSON literals.
+- One public type per file. No wildcard imports.
 
 ## DTOs
 
-- **Always `record`s.** Request DTOs in `*/dto/`, never reused as entity types.
-- Validation annotations (`@NotBlank`, `@Email`, `@Size`, …) go on record components.
-- Response records expose `static from(Entity e)` (and `static from(Page<Entity> p)` where paginated) for non-trivial mapping. Trivial 1:1 records may skip the factory.
+- Always `record`s. Validation annotations on components (`@NotBlank`, `@Email`, `@Size`, `@NotNull`).
+- Response records expose `static from(Entity)` for non-trivial mapping; trivial 1:1 records may skip the factory.
 
 ## Entities
 
-- Extend `BaseEntity` (gives `UUID id`, `createdAt`, `updatedAt`, auditing). Never declare these fields yourself.
-- Lombok on entities: `@Getter @Setter @NoArgsConstructor @AllArgsConstructor @Builder` is fine. Do **not** add `@Data` (breaks JPA equality).
-- Cross-module references are `UUID` columns, never `@ManyToOne` across modules. Within a module, JPA relations are allowed if genuinely useful — default is still UUID + lookup-by-id.
+- Extend `BaseEntity` for `id` / `createdAt` / `updatedAt`. Don't redeclare these.
+- Lombok: `@Getter @Setter @NoArgsConstructor @AllArgsConstructor @Builder`. Never `@Data` (breaks JPA equality).
+- Cross-module refs: `UUID` columns only.
 - `@Enumerated(EnumType.STRING)` for every enum column.
-- Use `@Table(name = "snake_plural")` (`users`, `workflows`, `executions`, …).
+- `@Table(name = "snake_plural")`.
 
-## Dependency injection
+## DI
 
-- **Constructor injection only.** No `@Autowired` on fields or setters.
-- Single constructor → Spring auto-wires it; no annotation needed.
-- Fields are `private final`.
-- Lombok `@RequiredArgsConstructor` is **allowed** on services/components to cut boilerplate, but explicit constructors are also fine and preferred when there's any custom init logic.
+- Constructor injection only. `private final` fields. Single explicit constructor. **No** `@Autowired`, no setter injection, no `@RequiredArgsConstructor` — every component in this codebase declares its constructor explicitly.
 
 ## Exceptions
 
-- Throw `ResourceNotFoundException` for 404s. Add module-local exceptions when you need a distinct HTTP mapping; wire them up in `GlobalExceptionHandler`.
-- Never catch `Exception` and swallow it. Either handle a specific subtype or let `GlobalExceptionHandler` map it.
-- Service methods do not return `Optional` for "not found" — they throw. Repositories may return `Optional`.
+- Throw `ResourceNotFoundException` for 404. Module-specific exceptions wire up in `GlobalExceptionHandler`.
+- Services throw; repositories may return `Optional`.
+- Never catch `Exception` and swallow it — let `GlobalExceptionHandler` map.
 
-## Validation
+## External integrations
 
-- `@Valid` on controller request bodies. Validation errors propagate to `GlobalExceptionHandler` (extend it if you need a custom shape for `MethodArgumentNotValidException`).
+- Read config via `@Value("${prop:}")` with blank default.
+- Blank config → warn (`log.warn(...)`) + fall back to log-only / simulated success / typed exception. Never silently fake success without logging.
+- Live SDK calls behind a guard method (e.g., `StripeClient.requireConfigured()`) that throws a typed exception mapped in `GlobalExceptionHandler`.
 
-## Logging
+## Idempotency
 
-- SLF4J via Lombok `@Slf4j`. Use parameterized messages: `log.info("created workflow {} for {}", id, ownerId)`. No string concatenation.
-- The `correlationId` MDC key is populated by `MdcCorrelationFilter`. Don't set it manually — just log normally and it appears in the pattern.
+- Webhook entry points must be idempotent. Pattern: unique constraint on an idempotency column + `REQUIRES_NEW` insert + caller-side catch of `DataIntegrityViolationException`. See `workflow.IdempotencyService` and `payment.StripeWebhookService`.
 
-## Naming
+## Other
 
-- Packages lowercase. Classes `UpperCamel`. Methods/fields `lowerCamel`. Constants `UPPER_SNAKE`.
-- Controllers: `XxxController`, request mapping at class level (`/workflows`), nothing duplicated in method paths if the verb alone suffices.
-- Services: `XxxService`. Event classes: `XxxEvent` (past tense for things that happened — `WorkflowCompletedEvent`).
-- Repository methods: Spring Data naming (`findByEmail`, `existsByKey`).
-
-## Comments
-
-- Default to no comments. The code and identifiers should explain the *what*. Comment only the *why* when it's non-obvious — a constraint, a workaround, a deliberate divergence from convention.
+- `@Valid` on controller request bodies.
+- SLF4J via `LoggerFactory.getLogger(...)`. Parameterized messages, no string concat. `correlationId` MDC key is set by `MdcCorrelationFilter` — don't manage manually.
+- No comments unless the *why* is non-obvious.
